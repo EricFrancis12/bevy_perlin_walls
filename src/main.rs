@@ -2,8 +2,7 @@ use bevy::{
     prelude::*,
     render::mesh::{Indices, PrimitiveTopology},
 };
-use bevy_inspector_egui::prelude::*;
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use bevy_inspector_egui::{bevy_egui::EguiPlugin, prelude::*, quick::WorldInspectorPlugin};
 use noise::{NoiseFn, Perlin};
 
 const CUBOID_WIDTH: f32 = 2.0;
@@ -26,7 +25,11 @@ struct PerlinMesh;
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, WorldInspectorPlugin::default()))
+        .add_plugins((
+            DefaultPlugins,
+            EguiPlugin::default(),
+            WorldInspectorPlugin::default(),
+        ))
         .register_type::<MeshSettings>()
         .insert_resource(MeshSettings {
             resolution: 20,
@@ -45,21 +48,22 @@ fn setup(
     settings: Res<MeshSettings>,
 ) {
     // Camera
-    commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(0.0, 3.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
+    commands.spawn((
+        Name::new("Main Camera"),
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 3.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
 
     // Light
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
+    commands.spawn((
+        Name::new("Main Light"),
+        PointLight {
             intensity: 1500.0,
             shadows_enabled: true,
             ..default()
         },
-        transform: Transform::from_xyz(4.0, 8.0, 4.0),
-        ..default()
-    });
+        Transform::from_xyz(4.0, 8.0, 4.0),
+    ));
 
     spawn_perlin_meshes(&mut commands, &mut meshes, &mut materials, &settings);
 }
@@ -75,7 +79,7 @@ fn regenerate_on_spacebar(
     if keyboard_input.just_pressed(KeyCode::Space) {
         // Despawn old meshes
         for entity in &query {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
 
         // Spawn new ones with updated settings
@@ -94,23 +98,21 @@ fn spawn_perlin_meshes(
     let mesh1 = generate_perlin_cuboid_mesh(Vec3::new(-CUBOID_WIDTH, 0.0, 0.0), &perlin, settings);
     let mesh2 = generate_perlin_cuboid_mesh(Vec3::new(0.0, 0.0, 0.0), &perlin, settings);
 
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(mesh1),
-            material: materials.add(Color::rgb(0.6, 0.6, 1.0)),
-            transform: Transform::from_translation(Vec3::ZERO),
-            ..default()
-        })
-        .insert(PerlinMesh);
+    commands.spawn((
+        Name::new("Mesh 1"),
+        PerlinMesh,
+        Mesh3d(meshes.add(mesh1)),
+        MeshMaterial3d(materials.add(Color::srgb(0.6, 0.6, 1.0))),
+        Transform::default(),
+    ));
 
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(mesh2),
-            material: materials.add(Color::rgb(0.6, 1.0, 0.6)),
-            transform: Transform::from_translation(Vec3::ZERO),
-            ..default()
-        })
-        .insert(PerlinMesh);
+    commands.spawn((
+        Name::new("Mesh 2"),
+        PerlinMesh,
+        Mesh3d(meshes.add(mesh2)),
+        MeshMaterial3d(materials.add(Color::srgb(0.6, 1.0, 0.6))),
+        Transform::default(),
+    ));
 }
 
 fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
