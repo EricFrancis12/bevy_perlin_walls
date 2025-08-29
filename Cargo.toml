@@ -1,0 +1,9 @@
+[package]
+name = "bevy_perlin_walls"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.13"
+bevy-inspector-egui = "0.24"
+noise = "0.8"
