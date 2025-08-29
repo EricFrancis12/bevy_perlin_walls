@@ -2,6 +2,7 @@ use bevy::{
     prelude::*,
     render::mesh::{Indices, PrimitiveTopology},
 };
+use bevy_inspector_egui::prelude::*;
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use noise::{NoiseFn, Perlin};
 
@@ -9,14 +10,31 @@ const CUBOID_WIDTH: f32 = 2.0;
 const CUBOID_DEPTH: f32 = 2.0;
 const CUBOID_HEIGHT: f32 = 0.2;
 
-const RESOLUTION: usize = 20; // How many vertices per row/column on the top surface
-const NOISE_SCALE: f64 = 1.0;
-const NOISE_HEIGHT: f32 = 0.3;
+#[derive(Resource, Reflect, Default, InspectorOptions)]
+#[reflect(Resource, InspectorOptions)]
+struct MeshSettings {
+    #[inspector(min = 2, max = 200)]
+    resolution: usize,
+    #[inspector(min = 0.0, max = 10.0)]
+    noise_scale: f64,
+    #[inspector(min = 0.0, max = 2.0)]
+    noise_height: f32,
+}
+
+#[derive(Component)]
+struct PerlinMesh;
 
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, WorldInspectorPlugin::default()))
+        .register_type::<MeshSettings>()
+        .insert_resource(MeshSettings {
+            resolution: 20,
+            noise_scale: 1.0,
+            noise_height: 0.3,
+        })
         .add_systems(Startup, setup)
+        .add_systems(Update, regenerate_on_spacebar)
         .run();
 }
 
@@ -24,6 +42,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    settings: Res<MeshSettings>,
 ) {
     // Camera
     commands.spawn(Camera3dBundle {
@@ -42,104 +61,137 @@ fn setup(
         ..default()
     });
 
-    // Create Perlin noise generator
+    spawn_perlin_meshes(&mut commands, &mut meshes, &mut materials, &settings);
+}
+
+fn regenerate_on_spacebar(
+    mut commands: Commands,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    settings: Res<MeshSettings>,
+    query: Query<Entity, With<PerlinMesh>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        // Despawn old meshes
+        for entity in &query {
+            commands.entity(entity).despawn_recursive();
+        }
+
+        // Spawn new ones with updated settings
+        spawn_perlin_meshes(&mut commands, &mut meshes, &mut materials, &settings);
+    }
+}
+
+fn spawn_perlin_meshes(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    settings: &MeshSettings,
+) {
     let perlin = Perlin::new(12345);
 
-    // Generate two meshes
-    let mesh1 = generate_perlin_cuboid_mesh(Vec3::new(-CUBOID_WIDTH, 0.0, 0.0), &perlin);
-    let mesh2 = generate_perlin_cuboid_mesh(Vec3::new(0.0, 0.0, 0.0), &perlin);
+    let mesh1 = generate_perlin_cuboid_mesh(Vec3::new(-CUBOID_WIDTH, 0.0, 0.0), &perlin, settings);
+    let mesh2 = generate_perlin_cuboid_mesh(Vec3::new(0.0, 0.0, 0.0), &perlin, settings);
 
-    // Spawn mesh 1
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(mesh1),
-        material: materials.add(Color::rgb(0.6, 0.6, 1.0)),
-        transform: Transform::from_translation(Vec3::ZERO),
-        ..default()
-    });
+    commands
+        .spawn(PbrBundle {
+            mesh: meshes.add(mesh1),
+            material: materials.add(Color::rgb(0.6, 0.6, 1.0)),
+            transform: Transform::from_translation(Vec3::ZERO),
+            ..default()
+        })
+        .insert(PerlinMesh);
 
-    // Spawn mesh 2
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(mesh2),
-        material: materials.add(Color::rgb(0.6, 1.0, 0.6)),
-        transform: Transform::from_translation(Vec3::ZERO),
-        ..default()
-    });
+    commands
+        .spawn(PbrBundle {
+            mesh: meshes.add(mesh2),
+            material: materials.add(Color::rgb(0.6, 1.0, 0.6)),
+            transform: Transform::from_translation(Vec3::ZERO),
+            ..default()
+        })
+        .insert(PerlinMesh);
 }
-fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin) -> Mesh {
+
+fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
+    let resolution = settings.resolution;
+    let noise_scale = settings.noise_scale;
+    let noise_height = settings.noise_height;
+
     let mut positions = Vec::new();
     let mut normals = Vec::new();
     let mut uvs = Vec::new();
     let mut indices = Vec::new();
 
-    let dx = CUBOID_WIDTH / RESOLUTION as f32;
-    let dz = CUBOID_DEPTH / RESOLUTION as f32;
+    let dx = CUBOID_WIDTH / resolution as f32;
+    let dz = CUBOID_DEPTH / resolution as f32;
 
     let mut top_indices = vec![];
     let mut bottom_indices = vec![];
 
     // Generate top and bottom vertices
-    for z in 0..=RESOLUTION {
-        for x in 0..=RESOLUTION {
+    for z in 0..=resolution {
+        for x in 0..=resolution {
             let world_x = origin.x + x as f32 * dx;
             let world_z = origin.z + z as f32 * dz;
 
             let noise_y = perlin.get([
-                world_x as f64 * NOISE_SCALE,
+                world_x as f64 * noise_scale,
                 0.0,
-                world_z as f64 * NOISE_SCALE,
+                world_z as f64 * noise_scale,
             ]) as f32;
 
-            let top_y = origin.y + CUBOID_HEIGHT + noise_y * NOISE_HEIGHT;
+            let top_y = origin.y + CUBOID_HEIGHT + noise_y * noise_height;
             let bottom_y = origin.y;
 
             // Top vertex
             top_indices.push(positions.len() as u32);
             positions.push([world_x, top_y, world_z]);
             normals.push([0.0, 1.0, 0.0]);
-            uvs.push([x as f32 / RESOLUTION as f32, z as f32 / RESOLUTION as f32]);
+            uvs.push([x as f32 / resolution as f32, z as f32 / resolution as f32]);
 
             // Bottom vertex
             bottom_indices.push(positions.len() as u32);
             positions.push([world_x, bottom_y, world_z]);
             normals.push([0.0, -1.0, 0.0]);
-            uvs.push([x as f32 / RESOLUTION as f32, z as f32 / RESOLUTION as f32]);
+            uvs.push([x as f32 / resolution as f32, z as f32 / resolution as f32]);
         }
     }
 
-    // Top face indices
-    for z in 0..RESOLUTION {
-        for x in 0..RESOLUTION {
-            let i = x + z * (RESOLUTION + 1);
+    // Top face
+    for z in 0..resolution {
+        for x in 0..resolution {
+            let i = x + z * (resolution + 1);
             indices.extend([
                 top_indices[i],
                 top_indices[i + 1],
-                top_indices[i + RESOLUTION + 1],
+                top_indices[i + resolution + 1],
                 top_indices[i + 1],
-                top_indices[i + RESOLUTION + 2],
-                top_indices[i + RESOLUTION + 1],
+                top_indices[i + resolution + 2],
+                top_indices[i + resolution + 1],
             ]);
         }
     }
 
-    // Bottom face indices (winding reversed)
-    for z in 0..RESOLUTION {
-        for x in 0..RESOLUTION {
-            let i = x + z * (RESOLUTION + 1);
+    // Bottom face
+    for z in 0..resolution {
+        for x in 0..resolution {
+            let i = x + z * (resolution + 1);
             indices.extend([
                 bottom_indices[i],
-                bottom_indices[i + RESOLUTION + 1],
+                bottom_indices[i + resolution + 1],
                 bottom_indices[i + 1],
                 bottom_indices[i + 1],
-                bottom_indices[i + RESOLUTION + 1],
-                bottom_indices[i + RESOLUTION + 2],
+                bottom_indices[i + resolution + 1],
+                bottom_indices[i + resolution + 2],
             ]);
         }
     }
 
-    // Side faces (between top and bottom)
-    let row_len = RESOLUTION + 1;
-    for z in 0..RESOLUTION {
-        for x in 0..RESOLUTION {
+    // Side faces
+    let row_len = resolution + 1;
+    for z in 0..resolution {
+        for x in 0..resolution {
             let i = x + z * row_len;
             let top0 = top_indices[i];
             let top1 = top_indices[i + 1];
