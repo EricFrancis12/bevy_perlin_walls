@@ -1,13 +1,19 @@
+use std::f32::consts::FRAC_PI_2;
+
 use bevy::{
+    input::mouse::MouseMotion,
     prelude::*,
-    render::mesh::{Indices, PrimitiveTopology},
+    render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues},
 };
 use bevy_inspector_egui::{bevy_egui::EguiPlugin, prelude::*, quick::WorldInspectorPlugin};
 use noise::{NoiseFn, Perlin};
 
 const CUBOID_WIDTH: f32 = 2.0;
-const CUBOID_DEPTH: f32 = 2.0;
-const CUBOID_HEIGHT: f32 = 0.2;
+const HALF_CUBOID_WIDTH: f32 = CUBOID_WIDTH / 2.0;
+const CUBOID_DEPTH: f32 = 0.2;
+
+const MOVEMENT_SPEED: f32 = 5.0;
+const DRAG_SENSITIVITY: f32 = 0.004;
 
 #[derive(Resource, Reflect, Default, InspectorOptions)]
 #[reflect(Resource, InspectorOptions)]
@@ -37,7 +43,7 @@ fn main() {
             noise_height: 0.3,
         })
         .add_systems(Startup, setup)
-        .add_systems(Update, regenerate_on_spacebar)
+        .add_systems(Update, (fly_camera, drag_camera, regenerate_on_spacebar))
         .run();
 }
 
@@ -65,7 +71,76 @@ fn setup(
         Transform::from_xyz(4.0, 8.0, 4.0),
     ));
 
+    // Origin
+    commands.spawn((
+        Name::new("Origin"),
+        Mesh3d(meshes.add(Cuboid::new(0.1, 0.1, 0.1))),
+        MeshMaterial3d(materials.add(Color::srgb(0.7, 0.3, 0.3))),
+        Transform::default(),
+    ));
+
     spawn_perlin_meshes(&mut commands, &mut meshes, &mut materials, &settings);
+}
+
+fn fly_camera(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut Transform, With<Camera3d>>,
+) {
+    let mut direction = Vec3::ZERO;
+    if keyboard.pressed(KeyCode::KeyD) {
+        direction.x += 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyA) {
+        direction.x -= 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyQ) {
+        direction.y += 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyX) {
+        direction.y -= 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyW) {
+        direction.z += 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyS) {
+        direction.z -= 1.0;
+    }
+
+    if direction != Vec3::ZERO {
+        direction = direction.normalize();
+        for mut transform in &mut query {
+            // Move relative to camera's local axes
+            let forward = transform.forward();
+            let right = transform.right();
+            let up = Vec3::Y;
+            let movement = forward * direction.z + right * direction.x + up * direction.y;
+            transform.translation += movement * MOVEMENT_SPEED * time.delta_secs();
+        }
+    }
+}
+
+fn drag_camera(
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    mut mouse_motion_events: EventReader<MouseMotion>,
+    mut query: Query<&mut Transform, With<Camera3d>>,
+) {
+    if mouse_button.pressed(MouseButton::Left) {
+        let mut delta = Vec2::ZERO;
+        for event in mouse_motion_events.read() {
+            delta += event.delta;
+        }
+        if delta != Vec2::ZERO {
+            for mut transform in &mut query {
+                // Yaw (around global Y)
+                let yaw = Quat::from_rotation_y(-delta.x * DRAG_SENSITIVITY);
+                // Pitch (around local X)
+                let pitch = Quat::from_rotation_x(-delta.y * DRAG_SENSITIVITY);
+                transform.rotation = yaw * transform.rotation; // yaw first
+                transform.rotation = transform.rotation * pitch; // then pitch
+            }
+        }
+    }
 }
 
 fn regenerate_on_spacebar(
@@ -95,27 +170,73 @@ fn spawn_perlin_meshes(
 ) {
     let perlin = Perlin::new(12345);
 
-    let mesh1 = generate_perlin_cuboid_mesh(Vec3::new(-CUBOID_WIDTH, 0.0, 0.0), &perlin, settings);
-    let mesh2 = generate_perlin_cuboid_mesh(Vec3::new(0.0, 0.0, 0.0), &perlin, settings);
+    let mesh_000 = generate_cell_mesh(Vec3::new(0.0, 0.0, 0.0), &perlin, settings);
+    let mesh_001 = generate_cell_mesh(Vec3::new(0.0, 0.0, CUBOID_WIDTH), &perlin, settings);
 
     commands.spawn((
-        Name::new("Mesh 1"),
+        Name::new("Mesh 000"),
         PerlinMesh,
-        Mesh3d(meshes.add(mesh1)),
+        Mesh3d(meshes.add(mesh_000)),
         MeshMaterial3d(materials.add(Color::srgb(0.6, 0.6, 1.0))),
         Transform::default(),
     ));
 
     commands.spawn((
-        Name::new("Mesh 2"),
+        Name::new("Mesh 001"),
         PerlinMesh,
-        Mesh3d(meshes.add(mesh2)),
-        MeshMaterial3d(materials.add(Color::srgb(0.6, 1.0, 0.6))),
+        Mesh3d(meshes.add(mesh_001)),
+        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
         Transform::default(),
     ));
 }
 
-fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
+fn generate_cell_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
+    let mesh_x_pos = generate_wall_mesh(
+        origin,
+        &perlin,
+        settings,
+        Some(Vec3::new(
+            -HALF_CUBOID_WIDTH,
+            HALF_CUBOID_WIDTH,
+            -HALF_CUBOID_WIDTH,
+        )),
+        Some(Quat::from_rotation_z(-FRAC_PI_2)),
+    );
+
+    let mesh_x_neg = generate_wall_mesh(
+        origin,
+        &perlin,
+        settings,
+        Some(Vec3::new(
+            HALF_CUBOID_WIDTH,
+            -HALF_CUBOID_WIDTH,
+            -HALF_CUBOID_WIDTH,
+        )),
+        Some(Quat::from_rotation_z(FRAC_PI_2)),
+    );
+
+    let mesh_y_neg = generate_wall_mesh(
+        origin,
+        &perlin,
+        settings,
+        Some(Vec3::new(
+            -HALF_CUBOID_WIDTH,
+            -HALF_CUBOID_WIDTH,
+            -HALF_CUBOID_WIDTH,
+        )),
+        None,
+    );
+
+    merge_meshes!(mesh_x_pos, mesh_x_neg, mesh_y_neg)
+}
+
+fn generate_wall_mesh(
+    origin: Vec3,
+    perlin: &Perlin,
+    settings: &MeshSettings,
+    translation: Option<Vec3>,
+    rotation: Option<Quat>,
+) -> Mesh {
     let resolution = settings.resolution;
     let noise_scale = settings.noise_scale;
     let noise_height = settings.noise_height;
@@ -126,7 +247,7 @@ fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSet
     let mut indices = Vec::new();
 
     let dx = CUBOID_WIDTH / resolution as f32;
-    let dz = CUBOID_DEPTH / resolution as f32;
+    let dz = CUBOID_WIDTH / resolution as f32;
 
     let mut top_indices = vec![];
     let mut bottom_indices = vec![];
@@ -143,7 +264,7 @@ fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSet
                 world_z as f64 * noise_scale,
             ]) as f32;
 
-            let top_y = origin.y + CUBOID_HEIGHT + noise_y * noise_height;
+            let top_y = origin.y + CUBOID_DEPTH + noise_y * noise_height;
             let bottom_y = origin.y;
 
             // Top vertex
@@ -219,6 +340,14 @@ fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSet
         }
     }
 
+    // Rotation must be applied before translation, so the axes stay correct
+    if let Some(rotation) = rotation {
+        rotate(&mut positions, &mut normals, rotation);
+    }
+    if let Some(translation) = translation {
+        translate(&mut positions, translation);
+    }
+
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         bevy::render::render_asset::RenderAssetUsages::default(),
@@ -229,4 +358,104 @@ fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSet
     mesh.insert_indices(Indices::U32(indices));
 
     mesh
+}
+
+fn translate(positions: &mut Vec<[f32; 3]>, offset: Vec3) {
+    for pos in positions.iter_mut() {
+        pos[0] += offset.x;
+        pos[1] += offset.y;
+        pos[2] += offset.z;
+    }
+}
+
+fn rotate(positions: &mut Vec<[f32; 3]>, normals: &mut Vec<[f32; 3]>, rotation: Quat) {
+    for pos in positions.iter_mut() {
+        let v = Vec3::new(pos[0], pos[1], pos[2]);
+        let rotated = rotation * v;
+        pos[0] = rotated.x;
+        pos[1] = rotated.y;
+        pos[2] = rotated.z;
+    }
+    for normal in normals.iter_mut() {
+        let v = Vec3::new(normal[0], normal[1], normal[2]);
+        let rotated = rotation * v;
+        normal[0] = rotated.x;
+        normal[1] = rotated.y;
+        normal[2] = rotated.z;
+    }
+}
+
+fn merge_meshes(mesh_a: &Mesh, mesh_b: &Mesh) -> Mesh {
+    // Get attributes from both meshes
+    let mut positions: Vec<[f32; 3]> = mesh_a
+        .attribute(Mesh::ATTRIBUTE_POSITION)
+        .unwrap()
+        .as_float3()
+        .unwrap()
+        .to_vec();
+    let mut normals: Vec<[f32; 3]> = mesh_a
+        .attribute(Mesh::ATTRIBUTE_NORMAL)
+        .unwrap()
+        .as_float3()
+        .unwrap()
+        .to_vec();
+    let mut uvs: Vec<[f32; 2]> = match mesh_a.attribute(Mesh::ATTRIBUTE_UV_0).unwrap() {
+        VertexAttributeValues::Float32x2(values) => values.clone(),
+        _ => panic!("UV_0 attribute is not Float32x2"),
+    };
+
+    let positions_b = mesh_b
+        .attribute(Mesh::ATTRIBUTE_POSITION)
+        .unwrap()
+        .as_float3()
+        .unwrap();
+    let normals_b = mesh_b
+        .attribute(Mesh::ATTRIBUTE_NORMAL)
+        .unwrap()
+        .as_float3()
+        .unwrap();
+    let uvs_b: Vec<[f32; 2]> = match mesh_a.attribute(Mesh::ATTRIBUTE_UV_0).unwrap() {
+        VertexAttributeValues::Float32x2(values) => values.clone(),
+        _ => panic!("UV_0 attribute is not Float32x2"),
+    };
+
+    let offset = positions.len() as u32;
+
+    positions.extend_from_slice(positions_b);
+    normals.extend_from_slice(normals_b);
+    uvs.extend_from_slice(&uvs_b);
+
+    // Merge indices
+    let mut indices: Vec<u32> = match mesh_a.indices().unwrap() {
+        Indices::U32(vec) => vec.clone(),
+        _ => panic!("Only U32 indices supported"),
+    };
+    let indices_b: Vec<u32> = match mesh_b.indices().unwrap() {
+        Indices::U32(vec) => vec.iter().map(|i| i + offset).collect(),
+        _ => panic!("Only U32 indices supported"),
+    };
+    indices.extend(indices_b);
+
+    // Create new mesh
+    let mut mesh = Mesh::new(
+        mesh_a.primitive_topology(),
+        bevy::render::render_asset::RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+
+    mesh
+}
+
+#[macro_export]
+macro_rules! merge_meshes {
+    ($first:expr $(, $rest:expr)*) => {{
+        let mut result = $first.clone(); // TODO: refactor to not use clone()?
+        $(
+            result = merge_meshes(&result, &$rest);
+        )*
+        result
+    }};
 }
