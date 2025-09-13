@@ -1,14 +1,16 @@
 use bevy::{
+    input::mouse::MouseMotion,
     prelude::*,
     render::mesh::{Indices, PrimitiveTopology},
 };
-use bevy_inspector_egui::prelude::*;
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use bevy_inspector_egui::{bevy_egui::EguiPlugin, prelude::*, quick::WorldInspectorPlugin};
 use noise::{NoiseFn, Perlin};
 
 const CUBOID_WIDTH: f32 = 2.0;
-const CUBOID_DEPTH: f32 = 2.0;
-const CUBOID_HEIGHT: f32 = 0.2;
+const CUBOID_DEPTH: f32 = 0.2;
+
+const MOVEMENT_SPEED: f32 = 5.0;
+const DRAG_SENSITIVITY: f32 = 0.004;
 
 #[derive(Resource, Reflect, Default, InspectorOptions)]
 #[reflect(Resource, InspectorOptions)]
@@ -26,7 +28,11 @@ struct PerlinMesh;
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, WorldInspectorPlugin::default()))
+        .add_plugins((
+            DefaultPlugins,
+            EguiPlugin::default(),
+            WorldInspectorPlugin::default(),
+        ))
         .register_type::<MeshSettings>()
         .insert_resource(MeshSettings {
             resolution: 20,
@@ -34,7 +40,7 @@ fn main() {
             noise_height: 0.3,
         })
         .add_systems(Startup, setup)
-        .add_systems(Update, regenerate_on_spacebar)
+        .add_systems(Update, (fly_camera, drag_camera, regenerate_on_spacebar))
         .run();
 }
 
@@ -45,25 +51,94 @@ fn setup(
     settings: Res<MeshSettings>,
 ) {
     // Camera
-    commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(0.0, 3.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
+    commands.spawn((
+        Name::new("Main Camera"),
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 3.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
 
     // Light
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
+    commands.spawn((
+        Name::new("Main Light"),
+        PointLight {
             intensity: 1500.0,
             shadows_enabled: true,
             ..default()
         },
-        transform: Transform::from_xyz(4.0, 8.0, 4.0),
-        ..default()
-    });
+        Transform::from_xyz(4.0, 8.0, 4.0),
+    ));
+
+    // Origin
+    commands.spawn((
+        Name::new("Origin"),
+        Mesh3d(meshes.add(Cuboid::new(0.1, 0.1, 0.1))),
+        MeshMaterial3d(materials.add(Color::srgb(0.7, 0.3, 0.3))),
+        Transform::default(),
+    ));
 
     spawn_perlin_meshes(&mut commands, &mut meshes, &mut materials, &settings);
 }
 
+fn fly_camera(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut Transform, With<Camera3d>>,
+) {
+    let mut direction = Vec3::ZERO;
+    if keyboard.pressed(KeyCode::KeyD) {
+        direction.x += 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyA) {
+        direction.x -= 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyQ) {
+        direction.y += 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyX) {
+        direction.y -= 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyW) {
+        direction.z += 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyS) {
+        direction.z -= 1.0;
+    }
+
+    if direction != Vec3::ZERO {
+        direction = direction.normalize();
+        for mut transform in &mut query {
+            // Move relative to camera's local axes
+            let forward = transform.forward();
+            let right = transform.right();
+            let up = Vec3::Y;
+            let movement = forward * direction.z + right * direction.x + up * direction.y;
+            transform.translation += movement * MOVEMENT_SPEED * time.delta_secs();
+        }
+    }
+}
+
+fn drag_camera(
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    mut mouse_motion_events: EventReader<MouseMotion>,
+    mut query: Query<&mut Transform, With<Camera3d>>,
+) {
+    if mouse_button.pressed(MouseButton::Left) {
+        let mut delta = Vec2::ZERO;
+        for event in mouse_motion_events.read() {
+            delta += event.delta;
+        }
+        if delta != Vec2::ZERO {
+            for mut transform in &mut query {
+                // Yaw (around global Y)
+                let yaw = Quat::from_rotation_y(-delta.x * DRAG_SENSITIVITY);
+                // Pitch (around local X)
+                let pitch = Quat::from_rotation_x(-delta.y * DRAG_SENSITIVITY);
+                transform.rotation = yaw * transform.rotation; // yaw first
+                transform.rotation = transform.rotation * pitch; // then pitch
+            }
+        }
+    }
+}
 fn regenerate_on_spacebar(
     mut commands: Commands,
     keyboard_input: Res<ButtonInput<KeyCode>>,
@@ -75,7 +150,7 @@ fn regenerate_on_spacebar(
     if keyboard_input.just_pressed(KeyCode::Space) {
         // Despawn old meshes
         for entity in &query {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
 
         // Spawn new ones with updated settings
@@ -94,23 +169,21 @@ fn spawn_perlin_meshes(
     let mesh1 = generate_perlin_cuboid_mesh(Vec3::new(-CUBOID_WIDTH, 0.0, 0.0), &perlin, settings);
     let mesh2 = generate_perlin_cuboid_mesh(Vec3::new(0.0, 0.0, 0.0), &perlin, settings);
 
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(mesh1),
-            material: materials.add(Color::rgb(0.6, 0.6, 1.0)),
-            transform: Transform::from_translation(Vec3::ZERO),
-            ..default()
-        })
-        .insert(PerlinMesh);
+    commands.spawn((
+        Name::new("Mesh 1"),
+        PerlinMesh,
+        Mesh3d(meshes.add(mesh1)),
+        MeshMaterial3d(materials.add(Color::srgb(0.6, 0.6, 1.0))),
+        Transform::default(),
+    ));
 
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(mesh2),
-            material: materials.add(Color::rgb(0.6, 1.0, 0.6)),
-            transform: Transform::from_translation(Vec3::ZERO),
-            ..default()
-        })
-        .insert(PerlinMesh);
+    commands.spawn((
+        Name::new("Mesh 2"),
+        PerlinMesh,
+        Mesh3d(meshes.add(mesh2)),
+        MeshMaterial3d(materials.add(Color::srgb(0.6, 1.0, 0.6))),
+        Transform::default(),
+    ));
 }
 
 fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
@@ -124,7 +197,7 @@ fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSet
     let mut indices = Vec::new();
 
     let dx = CUBOID_WIDTH / resolution as f32;
-    let dz = CUBOID_DEPTH / resolution as f32;
+    let dz = CUBOID_WIDTH / resolution as f32;
 
     let mut top_indices = vec![];
     let mut bottom_indices = vec![];
@@ -141,7 +214,7 @@ fn generate_perlin_cuboid_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSet
                 world_z as f64 * noise_scale,
             ]) as f32;
 
-            let top_y = origin.y + CUBOID_HEIGHT + noise_y * noise_height;
+            let top_y = origin.y + CUBOID_DEPTH + noise_y * noise_height;
             let bottom_y = origin.y;
 
             // Top vertex
