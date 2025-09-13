@@ -1,4 +1,4 @@
-use std::f32::consts::FRAC_PI_2;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 use bevy::{
     input::mouse::MouseMotion,
@@ -172,6 +172,7 @@ fn spawn_perlin_meshes(
 
     let mesh_000 = generate_cell_mesh(Vec3::new(0.0, 0.0, 0.0), &perlin, settings);
     let mesh_001 = generate_cell_mesh(Vec3::new(0.0, 0.0, CUBOID_WIDTH), &perlin, settings);
+    let mesh_100 = generate_cell_mesh(Vec3::new(CUBOID_WIDTH * 2.0, 0.0, 0.0), &perlin, settings);
 
     commands.spawn((
         Name::new("Mesh 000"),
@@ -186,15 +187,26 @@ fn spawn_perlin_meshes(
         PerlinMesh,
         Mesh3d(meshes.add(mesh_001)),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
-        Transform::default(),
+        Transform::from_xyz(0.0, 0.0, CUBOID_WIDTH),
+    ));
+
+    commands.spawn((
+        Name::new("Mesh 100"),
+        PerlinMesh,
+        Mesh3d(meshes.add(mesh_100)),
+        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
+        Transform::from_xyz(CUBOID_WIDTH, 0.0, 0.0),
     ));
 }
 
 fn generate_cell_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
     let mesh_x_pos = generate_wall_mesh(origin, &perlin, settings, Direction::XPos);
     let mesh_x_neg = generate_wall_mesh(origin, &perlin, settings, Direction::XNeg);
+    let mesh_y_pos = generate_wall_mesh(origin, &perlin, settings, Direction::YPos);
     let mesh_y_neg = generate_wall_mesh(origin, &perlin, settings, Direction::YNeg);
-    merge_meshes!(mesh_x_pos, mesh_x_neg, mesh_y_neg)
+    let mesh_z_pos = generate_wall_mesh(origin, &perlin, settings, Direction::ZPos);
+    let mesh_z_neg = generate_wall_mesh(origin, &perlin, settings, Direction::ZNeg);
+    merge_meshes!(mesh_x_pos, mesh_x_neg, mesh_y_pos, mesh_y_neg, mesh_z_pos, mesh_z_neg)
 }
 
 #[derive(Debug, Clone, Reflect)]
@@ -212,10 +224,10 @@ impl Direction {
         match self {
             Self::XPos => Vec3::new(-HALF_CUBOID_WIDTH, HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
             Self::XNeg => Vec3::new(HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
-            Self::YPos => Vec3::new(-HALF_CUBOID_WIDTH, HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
+            Self::YPos => Vec3::new(HALF_CUBOID_WIDTH, HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
             Self::YNeg => Vec3::new(-HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
             Self::ZPos => Vec3::new(-HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH, HALF_CUBOID_WIDTH),
-            Self::ZNeg => Vec3::new(-HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
+            Self::ZNeg => Vec3::new(-HALF_CUBOID_WIDTH, HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
         }
     }
 
@@ -223,7 +235,7 @@ impl Direction {
         match self {
             Self::XPos => Quat::from_rotation_z(-FRAC_PI_2),
             Self::XNeg => Quat::from_rotation_z(FRAC_PI_2),
-            Self::YPos => Quat::from_rotation_x(FRAC_PI_2),
+            Self::YPos => Quat::from_rotation_z(PI),
             Self::YNeg => Quat::default(),
             Self::ZPos => Quat::from_rotation_x(-FRAC_PI_2),
             Self::ZNeg => Quat::from_rotation_x(FRAC_PI_2),
@@ -255,9 +267,10 @@ fn generate_wall_mesh(
     // Generate top and bottom vertices
     for z in 0..=resolution {
         for x in 0..=resolution {
-            let world_x = origin.x + x as f32 * dx;
-            let world_z = origin.z + z as f32 * dz;
+            let world_x = x as f32 * dx;
+            let world_z = z as f32 * dz;
 
+            // Unique offset for each wall
             let wall_offset = match direction {
                 Direction::YNeg => 100.0,
                 Direction::XPos => 200.0,
@@ -268,13 +281,13 @@ fn generate_wall_mesh(
             };
 
             let noise_y = perlin.get([
-                world_x as f64 * noise_scale,
-                wall_offset, // unique offset for each wall
-                world_z as f64 * noise_scale,
+                (world_x as f64 + origin.x as f64) * noise_scale,
+                wall_offset + origin.y as f64,
+                (world_z as f64 + origin.z as f64) * noise_scale,
             ]) as f32;
 
-            let top_y = origin.y + CUBOID_DEPTH + noise_y * noise_height;
-            let bottom_y = origin.y;
+            let top_y = CUBOID_DEPTH + noise_y * noise_height;
+            let bottom_y = 0.;
 
             // Top vertex
             top_indices.push(positions.len() as u32);
