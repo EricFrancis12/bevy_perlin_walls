@@ -68,6 +68,14 @@ fn setup(
         Transform::from_xyz(4.0, 8.0, 4.0),
     ));
 
+    // Origin
+    commands.spawn((
+        Name::new("Origin"),
+        Mesh3d(meshes.add(Cuboid::new(0.1, 0.1, 0.1))),
+        MeshMaterial3d(materials.add(Color::srgb(0.7, 0.3, 0.3))),
+        Transform::default(),
+    ));
+
     spawn_perlin_meshes(&mut commands, &mut meshes, &mut materials, &settings);
 }
 
