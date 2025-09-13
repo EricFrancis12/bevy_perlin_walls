@@ -38,7 +38,7 @@ fn main() {
         ))
         .register_type::<MeshSettings>()
         .insert_resource(MeshSettings {
-            resolution: 20,
+            resolution: 60,
             noise_scale: 1.0,
             noise_height: 0.3,
         })
@@ -191,51 +191,51 @@ fn spawn_perlin_meshes(
 }
 
 fn generate_cell_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
-    let mesh_x_pos = generate_wall_mesh(
-        origin,
-        &perlin,
-        settings,
-        Some(Vec3::new(
-            -HALF_CUBOID_WIDTH,
-            HALF_CUBOID_WIDTH,
-            -HALF_CUBOID_WIDTH,
-        )),
-        Some(Quat::from_rotation_z(-FRAC_PI_2)),
-    );
-
-    let mesh_x_neg = generate_wall_mesh(
-        origin,
-        &perlin,
-        settings,
-        Some(Vec3::new(
-            HALF_CUBOID_WIDTH,
-            -HALF_CUBOID_WIDTH,
-            -HALF_CUBOID_WIDTH,
-        )),
-        Some(Quat::from_rotation_z(FRAC_PI_2)),
-    );
-
-    let mesh_y_neg = generate_wall_mesh(
-        origin,
-        &perlin,
-        settings,
-        Some(Vec3::new(
-            -HALF_CUBOID_WIDTH,
-            -HALF_CUBOID_WIDTH,
-            -HALF_CUBOID_WIDTH,
-        )),
-        None,
-    );
-
+    let mesh_x_pos = generate_wall_mesh(origin, &perlin, settings, Direction::XPos);
+    let mesh_x_neg = generate_wall_mesh(origin, &perlin, settings, Direction::XNeg);
+    let mesh_y_neg = generate_wall_mesh(origin, &perlin, settings, Direction::YNeg);
     merge_meshes!(mesh_x_pos, mesh_x_neg, mesh_y_neg)
+}
+
+#[derive(Debug, Clone, Reflect)]
+pub enum Direction {
+    XPos,
+    XNeg,
+    YPos,
+    YNeg,
+    ZPos,
+    ZNeg,
+}
+
+impl Direction {
+    fn mesh_translation(&self) -> Vec3 {
+        match self {
+            Self::XPos => Vec3::new(-HALF_CUBOID_WIDTH, HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
+            Self::XNeg => Vec3::new(HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
+            Self::YPos => Vec3::new(-HALF_CUBOID_WIDTH, HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
+            Self::YNeg => Vec3::new(-HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
+            Self::ZPos => Vec3::new(-HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH, HALF_CUBOID_WIDTH),
+            Self::ZNeg => Vec3::new(-HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH, -HALF_CUBOID_WIDTH),
+        }
+    }
+
+    fn mesh_rotation(&self) -> Quat {
+        match self {
+            Self::XPos => Quat::from_rotation_z(-FRAC_PI_2),
+            Self::XNeg => Quat::from_rotation_z(FRAC_PI_2),
+            Self::YPos => Quat::from_rotation_x(FRAC_PI_2),
+            Self::YNeg => Quat::default(),
+            Self::ZPos => Quat::from_rotation_x(-FRAC_PI_2),
+            Self::ZNeg => Quat::from_rotation_x(FRAC_PI_2),
+        }
+    }
 }
 
 fn generate_wall_mesh(
     origin: Vec3,
     perlin: &Perlin,
     settings: &MeshSettings,
-    translation: Option<Vec3>,
-    rotation: Option<Quat>,
+    direction: Direction,
 ) -> Mesh {
     let resolution = settings.resolution;
     let noise_scale = settings.noise_scale;
@@ -258,9 +258,18 @@ fn generate_wall_mesh(
             let world_x = origin.x + x as f32 * dx;
             let world_z = origin.z + z as f32 * dz;
 
+            let wall_offset = match direction {
+                Direction::YNeg => 100.0,
+                Direction::XPos => 200.0,
+                Direction::XNeg => 300.0,
+                Direction::ZPos => 400.0,
+                Direction::ZNeg => 500.0,
+                Direction::YPos => 600.0,
+            };
+
             let noise_y = perlin.get([
                 world_x as f64 * noise_scale,
-                0.0,
+                wall_offset, // unique offset for each wall
                 world_z as f64 * noise_scale,
             ]) as f32;
 
@@ -341,12 +350,8 @@ fn generate_wall_mesh(
     }
 
     // Rotation must be applied before translation, so the axes stay correct
-    if let Some(rotation) = rotation {
-        rotate(&mut positions, &mut normals, rotation);
-    }
-    if let Some(translation) = translation {
-        translate(&mut positions, translation);
-    }
+    rotate(&mut positions, &mut normals, direction.mesh_rotation());
+    translate(&mut positions, direction.mesh_translation());
 
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
