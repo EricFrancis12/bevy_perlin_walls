@@ -6,7 +6,7 @@ use bevy::{
     render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues},
 };
 use bevy_inspector_egui::{bevy_egui::EguiPlugin, prelude::*, quick::WorldInspectorPlugin};
-use noise::{NoiseFn, Perlin};
+use noise::Perlin;
 
 const CUBOID_WIDTH: f32 = 2.0;
 const HALF_CUBOID_WIDTH: f32 = CUBOID_WIDTH / 2.0;
@@ -182,21 +182,21 @@ fn spawn_perlin_meshes(
         Transform::default(),
     ));
 
-    commands.spawn((
-        Name::new("Mesh 001"),
-        PerlinMesh,
-        Mesh3d(meshes.add(mesh_001)),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
-        Transform::from_xyz(0.0, 0.0, CUBOID_WIDTH),
-    ));
+    // commands.spawn((
+    //     Name::new("Mesh 001"),
+    //     PerlinMesh,
+    //     Mesh3d(meshes.add(mesh_001)),
+    //     MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
+    //     Transform::from_xyz(0.0, 0.0, CUBOID_WIDTH),
+    // ));
 
-    commands.spawn((
-        Name::new("Mesh 100"),
-        PerlinMesh,
-        Mesh3d(meshes.add(mesh_100)),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
-        Transform::from_xyz(CUBOID_WIDTH, 0.0, 0.0),
-    ));
+    // commands.spawn((
+    //     Name::new("Mesh 100"),
+    //     PerlinMesh,
+    //     Mesh3d(meshes.add(mesh_100)),
+    //     MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
+    //     Transform::from_xyz(CUBOID_WIDTH, 0.0, 0.0),
+    // ));
 }
 
 fn generate_cell_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
@@ -375,6 +375,9 @@ fn merge_meshes(mesh_a: &Mesh, mesh_b: &Mesh) -> Mesh {
         _ => panic!("UV_0 attribute is not Float32x2"),
     };
 
+    // Shrink mesh_a's positions to be flush with mesh_b before merging
+    shrink_positions_to_flush(&mut positions, &positions_b);
+
     let offset = positions.len() as u32;
 
     positions.extend_from_slice(positions_b);
@@ -403,6 +406,108 @@ fn merge_meshes(mesh_a: &Mesh, mesh_b: &Mesh) -> Mesh {
     mesh.insert_indices(Indices::U32(indices));
 
     mesh
+}
+
+/// Shrinks the mesh represented by `positions` so it is flush with `other_positions` if they overlap
+fn shrink_positions_to_flush(positions: &mut Vec<[f32; 3]>, other_positions: &[[f32; 3]]) {
+    // Compute AABBs
+    let min_a = positions.iter().fold(Vec3::splat(f32::INFINITY), |min, p| {
+        Vec3::new(min.x.min(p[0]), min.y.min(p[1]), min.z.min(p[2]))
+    });
+    let max_a = positions
+        .iter()
+        .fold(Vec3::splat(f32::NEG_INFINITY), |max, p| {
+            Vec3::new(max.x.max(p[0]), max.y.max(p[1]), max.z.max(p[2]))
+        });
+    let min_b = other_positions
+        .iter()
+        .fold(Vec3::splat(f32::INFINITY), |min, p| {
+            Vec3::new(min.x.min(p[0]), min.y.min(p[1]), min.z.min(p[2]))
+        });
+    let max_b = other_positions
+        .iter()
+        .fold(Vec3::splat(f32::NEG_INFINITY), |max, p| {
+            Vec3::new(max.x.max(p[0]), max.y.max(p[1]), max.z.max(p[2]))
+        });
+
+    // Check for overlap
+    let overlap_x = max_a.x > min_b.x && min_a.x < max_b.x;
+    let overlap_y = max_a.y > min_b.y && min_a.y < max_b.y;
+    let overlap_z = max_a.z > min_b.z && min_a.z < max_b.z;
+
+    if overlap_x && overlap_y && overlap_z {
+        // Compute overlap amounts
+        let x_overlap = (max_a.x - min_b.x).min(max_b.x - min_a.x);
+        let y_overlap = (max_a.y - min_b.y).min(max_b.y - min_a.y);
+        let z_overlap = (max_a.z - min_b.z).min(max_b.z - min_a.z);
+
+        // Find axis of minimum overlap
+        let (axis, amount) = {
+            let mut min_axis = "x";
+            let mut min_amount = x_overlap;
+            if y_overlap < min_amount {
+                min_axis = "y";
+                min_amount = y_overlap;
+            }
+            if z_overlap < min_amount {
+                min_axis = "z";
+                min_amount = z_overlap;
+            }
+            (min_axis, min_amount)
+        };
+
+        // Mutate positions to shrink along that axis
+        match axis {
+            "x" => {
+                if max_a.x - min_b.x < max_b.x - min_a.x {
+                    // Shrink max_x
+                    for pos in positions.iter_mut() {
+                        if (pos[0] - max_a.x).abs() < 1e-4 {
+                            pos[0] -= amount;
+                        }
+                    }
+                } else {
+                    // Shrink min_x
+                    for pos in positions.iter_mut() {
+                        if (pos[0] - min_a.x).abs() < 1e-4 {
+                            pos[0] += amount;
+                        }
+                    }
+                }
+            }
+            "y" => {
+                if max_a.y - min_b.y < max_b.y - min_a.y {
+                    for pos in positions.iter_mut() {
+                        if (pos[1] - max_a.y).abs() < 1e-4 {
+                            pos[1] -= amount;
+                        }
+                    }
+                } else {
+                    for pos in positions.iter_mut() {
+                        if (pos[1] - min_a.y).abs() < 1e-4 {
+                            pos[1] += amount;
+                        }
+                    }
+                }
+            }
+            "z" => {
+                if max_a.z - min_b.z < max_b.z - min_a.z {
+                    for pos in positions.iter_mut() {
+                        if (pos[2] - max_a.z).abs() < 1e-4 {
+                            pos[2] -= amount;
+                        }
+                    }
+                } else {
+                    for pos in positions.iter_mut() {
+                        if (pos[2] - min_a.z).abs() < 1e-4 {
+                            pos[2] += amount;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[macro_export]
