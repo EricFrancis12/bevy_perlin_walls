@@ -182,21 +182,21 @@ fn spawn_perlin_meshes(
         Transform::default(),
     ));
 
-    // commands.spawn((
-    //     Name::new("Mesh 001"),
-    //     PerlinMesh,
-    //     Mesh3d(meshes.add(mesh_001)),
-    //     MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
-    //     Transform::from_xyz(0.0, 0.0, CUBOID_WIDTH),
-    // ));
+    commands.spawn((
+        Name::new("Mesh 001"),
+        PerlinMesh,
+        Mesh3d(meshes.add(mesh_001)),
+        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
+        Transform::from_xyz(0.0, 0.0, CUBOID_WIDTH),
+    ));
 
-    // commands.spawn((
-    //     Name::new("Mesh 100"),
-    //     PerlinMesh,
-    //     Mesh3d(meshes.add(mesh_100)),
-    //     MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
-    //     Transform::from_xyz(CUBOID_WIDTH, 0.0, 0.0),
-    // ));
+    commands.spawn((
+        Name::new("Mesh 100"),
+        PerlinMesh,
+        Mesh3d(meshes.add(mesh_100)),
+        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
+        Transform::from_xyz(CUBOID_WIDTH, 0.0, 0.0),
+    ));
 }
 
 fn generate_cell_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
@@ -206,6 +206,7 @@ fn generate_cell_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) ->
     let mesh_y_neg = generate_wall_mesh(&perlin, settings, Direction::YNeg);
     let mesh_z_pos = generate_wall_mesh(&perlin, settings, Direction::ZPos);
     let mesh_z_neg = generate_wall_mesh(&perlin, settings, Direction::ZNeg);
+
     // TODO: the light is still stopping at the edges where the walls were merged,
     // we need to ensure the light passes over it as though it's one solid object
     merge_meshes!(mesh_x_pos, mesh_x_neg, mesh_y_pos, mesh_y_neg, mesh_z_pos, mesh_z_neg)
@@ -247,6 +248,8 @@ impl Direction {
 
 fn generate_wall_mesh(perlin: &Perlin, settings: &MeshSettings, direction: Direction) -> Mesh {
     let origin = Vec3::ZERO;
+
+    // 8 cuboid corners
     let top_y = CUBOID_DEPTH;
     let bottom_y = 0.0;
     let corners = [
@@ -262,10 +265,35 @@ fn generate_wall_mesh(perlin: &Perlin, settings: &MeshSettings, direction: Direc
         [origin.x, top_y, origin.z + CUBOID_WIDTH],                // 7
     ];
 
-    let positions = corners.to_vec();
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut uvs = Vec::new();
+    let mut indices = Vec::new();
+
+    for (i, &corner) in corners.iter().enumerate() {
+        positions.push(corner);
+        let normal = match i {
+            0 | 1 | 2 | 3 => [0.0, -1.0, 0.0], // bottom
+            4 | 5 | 6 | 7 => [0.0, 1.0, 0.0],  // top
+            _ => [0.0, 0.0, 0.0],
+        };
+        normals.push(normal);
+        let uv = match i {
+            0 => [0.0, 0.0],
+            1 => [1.0, 0.0],
+            2 => [1.0, 1.0],
+            3 => [0.0, 1.0],
+            4 => [0.0, 0.0],
+            5 => [1.0, 0.0],
+            6 => [1.0, 1.0],
+            7 => [0.0, 1.0],
+            _ => [0.0, 0.0],
+        };
+        uvs.push(uv);
+    }
 
     // Indices for 12 triangles (2 per face)
-    let indices = vec![
+    indices.extend([
         // bottom
         0, 1, 2, 0, 2, 3, // top
         4, 6, 5, 4, 7, 6, // +X
@@ -273,55 +301,9 @@ fn generate_wall_mesh(perlin: &Perlin, settings: &MeshSettings, direction: Direc
         0, 3, 7, 0, 7, 4, // +Z
         2, 6, 7, 2, 7, 3, // -Z
         0, 4, 5, 0, 5, 1,
-    ];
-
-    // Compute smooth normals by averaging adjacent face normals for each vertex
-    let face_normals = [
-        [0.0, -1.0, 0.0], // bottom
-        [0.0, 1.0, 0.0],  // top
-        [1.0, 0.0, 0.0],  // +X
-        [-1.0, 0.0, 0.0], // -X
-        [0.0, 0.0, 1.0],  // +Z
-        [0.0, 0.0, -1.0], // -Z
-    ];
-    // For each vertex, list which faces it belongs to
-    let vertex_faces = [
-        vec![0, 3, 5], // 0
-        vec![0, 2, 5], // 1
-        vec![0, 2, 4], // 2
-        vec![0, 3, 4], // 3
-        vec![1, 3, 5], // 4
-        vec![1, 2, 5], // 5
-        vec![1, 2, 4], // 6
-        vec![1, 3, 4], // 7
-    ];
-
-    let mut normals = Vec::with_capacity(8);
-    for faces in vertex_faces.iter() {
-        let mut n = Vec3::ZERO;
-        for &f in faces {
-            let fnorm = Vec3::new(face_normals[f][0], face_normals[f][1], face_normals[f][2]);
-            n += fnorm;
-        }
-        n = n.normalize();
-        normals.push([n.x, n.y, n.z]);
-    }
-
-    // UVs (simple mapping)
-    let uvs = vec![
-        [0.0, 0.0],
-        [1.0, 0.0],
-        [1.0, 1.0],
-        [0.0, 1.0],
-        [0.0, 0.0],
-        [1.0, 0.0],
-        [1.0, 1.0],
-        [0.0, 1.0],
-    ];
+    ]);
 
     // Rotation must be applied before translation, so the axes stay correct
-    let mut positions = positions;
-    let mut normals = normals;
     rotate(&mut positions, &mut normals, direction.mesh_rotation());
     translate(&mut positions, direction.mesh_translation());
 
@@ -416,59 +398,15 @@ fn merge_meshes(mesh_a: &Mesh, mesh_b: &Mesh) -> Mesh {
     };
     indices.extend(indices_b);
 
-    // Weld vertices: deduplicate coincident positions and average normals/uvs
-    let epsilon = 1e-4;
-    let mut welded_positions: Vec<[f32; 3]> = Vec::new();
-    let mut welded_normals: Vec<[f32; 3]> = Vec::new();
-    let mut welded_uvs: Vec<[f32; 2]> = Vec::new();
-    let mut remap: Vec<usize> = vec![0; positions.len()];
-
-    for (i, &pos) in positions.iter().enumerate() {
-        // Try to find an existing welded vertex
-        let mut found = false;
-        for (j, &wpos) in welded_positions.iter().enumerate() {
-            if (pos[0] - wpos[0]).abs() < epsilon
-                && (pos[1] - wpos[1]).abs() < epsilon
-                && (pos[2] - wpos[2]).abs() < epsilon
-            {
-                // Average normal and uv
-                let n = Vec3::from(normals[i]) + Vec3::from(welded_normals[j]);
-                welded_normals[j] = [n.x, n.y, n.z];
-                welded_uvs[j][0] = (welded_uvs[j][0] + uvs[i][0]) * 0.5;
-                welded_uvs[j][1] = (welded_uvs[j][1] + uvs[i][1]) * 0.5;
-                remap[i] = j;
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            welded_positions.push(pos);
-            welded_normals.push(normals[i]);
-            welded_uvs.push(uvs[i]);
-            remap[i] = welded_positions.len() - 1;
-        }
-    }
-
-    // Normalize normals
-    for n in welded_normals.iter_mut() {
-        let v = Vec3::new(n[0], n[1], n[2]).normalize();
-        n[0] = v.x;
-        n[1] = v.y;
-        n[2] = v.z;
-    }
-
-    // Remap indices
-    let welded_indices: Vec<u32> = indices.iter().map(|&i| remap[i as usize] as u32).collect();
-
     // Create new mesh
     let mut mesh = Mesh::new(
         mesh_a.primitive_topology(),
         bevy::render::render_asset::RenderAssetUsages::default(),
     );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, welded_positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, welded_normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, welded_uvs);
-    mesh.insert_indices(Indices::U32(welded_indices));
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
 
     mesh
 }
