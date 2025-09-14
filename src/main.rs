@@ -182,32 +182,30 @@ fn spawn_perlin_meshes(
         Transform::default(),
     ));
 
-    // TODO: ...
-    // commands.spawn((
-    //     Name::new("Mesh 001"),
-    //     PerlinMesh,
-    //     Mesh3d(meshes.add(mesh_001)),
-    //     MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
-    //     Transform::from_xyz(0.0, 0.0, CUBOID_WIDTH),
-    // ));
+    commands.spawn((
+        Name::new("Mesh 001"),
+        PerlinMesh,
+        Mesh3d(meshes.add(mesh_001)),
+        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
+        Transform::from_xyz(0.0, 0.0, CUBOID_WIDTH),
+    ));
 
-    // TODO: ...
-    // commands.spawn((
-    //     Name::new("Mesh 100"),
-    //     PerlinMesh,
-    //     Mesh3d(meshes.add(mesh_100)),
-    //     MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
-    //     Transform::from_xyz(CUBOID_WIDTH, 0.0, 0.0),
-    // ));
+    commands.spawn((
+        Name::new("Mesh 100"),
+        PerlinMesh,
+        Mesh3d(meshes.add(mesh_100)),
+        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
+        Transform::from_xyz(CUBOID_WIDTH, 0.0, 0.0),
+    ));
 }
 
 fn generate_cell_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
-    let mesh_x_pos = generate_wall_mesh(origin, &perlin, settings, Direction::XPos);
-    let mesh_x_neg = generate_wall_mesh(origin, &perlin, settings, Direction::XNeg);
-    let mesh_y_pos = generate_wall_mesh(origin, &perlin, settings, Direction::YPos);
-    let mesh_y_neg = generate_wall_mesh(origin, &perlin, settings, Direction::YNeg);
-    let mesh_z_pos = generate_wall_mesh(origin, &perlin, settings, Direction::ZPos);
-    let mesh_z_neg = generate_wall_mesh(origin, &perlin, settings, Direction::ZNeg);
+    let mesh_x_pos = generate_wall_mesh(&perlin, settings, Direction::XPos);
+    let mesh_x_neg = generate_wall_mesh(&perlin, settings, Direction::XNeg);
+    let mesh_y_pos = generate_wall_mesh(&perlin, settings, Direction::YPos);
+    let mesh_y_neg = generate_wall_mesh(&perlin, settings, Direction::YNeg);
+    let mesh_z_pos = generate_wall_mesh(&perlin, settings, Direction::ZPos);
+    let mesh_z_neg = generate_wall_mesh(&perlin, settings, Direction::ZNeg);
     merge_meshes!(mesh_x_pos, mesh_x_neg, mesh_y_pos, mesh_y_neg, mesh_z_pos, mesh_z_neg)
 }
 
@@ -245,15 +243,12 @@ impl Direction {
     }
 }
 
-fn generate_wall_mesh(
-    origin: Vec3,
-    perlin: &Perlin,
-    settings: &MeshSettings,
-    direction: Direction,
-) -> Mesh {
+fn generate_wall_mesh(perlin: &Perlin, settings: &MeshSettings, direction: Direction) -> Mesh {
+    let origin = Vec3::ZERO;
+
     // 8 cuboid corners
-    let top_y = origin.y + CUBOID_DEPTH;
-    let bottom_y = origin.y;
+    let top_y = CUBOID_DEPTH;
+    let bottom_y = 0.0;
     let corners = [
         // bottom
         [origin.x, bottom_y, origin.z],                // 0
