@@ -182,21 +182,23 @@ fn spawn_perlin_meshes(
         Transform::default(),
     ));
 
-    commands.spawn((
-        Name::new("Mesh 001"),
-        PerlinMesh,
-        Mesh3d(meshes.add(mesh_001)),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
-        Transform::from_xyz(0.0, 0.0, CUBOID_WIDTH),
-    ));
+    // TODO: ...
+    // commands.spawn((
+    //     Name::new("Mesh 001"),
+    //     PerlinMesh,
+    //     Mesh3d(meshes.add(mesh_001)),
+    //     MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
+    //     Transform::from_xyz(0.0, 0.0, CUBOID_WIDTH),
+    // ));
 
-    commands.spawn((
-        Name::new("Mesh 100"),
-        PerlinMesh,
-        Mesh3d(meshes.add(mesh_100)),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
-        Transform::from_xyz(CUBOID_WIDTH, 0.0, 0.0),
-    ));
+    // TODO: ...
+    // commands.spawn((
+    //     Name::new("Mesh 100"),
+    //     PerlinMesh,
+    //     Mesh3d(meshes.add(mesh_100)),
+    //     MeshMaterial3d(materials.add(Color::srgb(0.3, 0.7, 0.9))),
+    //     Transform::from_xyz(CUBOID_WIDTH, 0.0, 0.0),
+    // ));
 }
 
 fn generate_cell_mesh(origin: Vec3, perlin: &Perlin, settings: &MeshSettings) -> Mesh {
@@ -249,118 +251,59 @@ fn generate_wall_mesh(
     settings: &MeshSettings,
     direction: Direction,
 ) -> Mesh {
-    let resolution = settings.resolution;
-    let noise_scale = settings.noise_scale;
-    let noise_height = settings.noise_height;
+    // 8 cuboid corners
+    let top_y = origin.y + CUBOID_DEPTH;
+    let bottom_y = origin.y;
+    let corners = [
+        // bottom
+        [origin.x, bottom_y, origin.z],                // 0
+        [origin.x + CUBOID_WIDTH, bottom_y, origin.z], // 1
+        [origin.x + CUBOID_WIDTH, bottom_y, origin.z + CUBOID_WIDTH], // 2
+        [origin.x, bottom_y, origin.z + CUBOID_WIDTH], // 3
+        // top
+        [origin.x, top_y, origin.z],                               // 4
+        [origin.x + CUBOID_WIDTH, top_y, origin.z],                // 5
+        [origin.x + CUBOID_WIDTH, top_y, origin.z + CUBOID_WIDTH], // 6
+        [origin.x, top_y, origin.z + CUBOID_WIDTH],                // 7
+    ];
 
     let mut positions = Vec::new();
     let mut normals = Vec::new();
     let mut uvs = Vec::new();
     let mut indices = Vec::new();
 
-    let dx = CUBOID_WIDTH / resolution as f32;
-    let dz = CUBOID_WIDTH / resolution as f32;
-
-    let mut top_indices = vec![];
-    let mut bottom_indices = vec![];
-
-    // Generate top and bottom vertices
-    for z in 0..=resolution {
-        for x in 0..=resolution {
-            let world_x = x as f32 * dx;
-            let world_z = z as f32 * dz;
-
-            // Unique offset for each wall
-            let wall_offset = match direction {
-                Direction::YNeg => 100.0,
-                Direction::XPos => 200.0,
-                Direction::XNeg => 300.0,
-                Direction::ZPos => 400.0,
-                Direction::ZNeg => 500.0,
-                Direction::YPos => 600.0,
-            };
-
-            let noise_y = perlin.get([
-                (world_x as f64 + origin.x as f64) * noise_scale,
-                wall_offset + origin.y as f64,
-                (world_z as f64 + origin.z as f64) * noise_scale,
-            ]) as f32;
-
-            let top_y = CUBOID_DEPTH + noise_y * noise_height;
-            let bottom_y = 0.;
-
-            // Top vertex
-            top_indices.push(positions.len() as u32);
-            positions.push([world_x, top_y, world_z]);
-            normals.push([0.0, 1.0, 0.0]);
-            uvs.push([x as f32 / resolution as f32, z as f32 / resolution as f32]);
-
-            // Bottom vertex
-            bottom_indices.push(positions.len() as u32);
-            positions.push([world_x, bottom_y, world_z]);
-            normals.push([0.0, -1.0, 0.0]);
-            uvs.push([x as f32 / resolution as f32, z as f32 / resolution as f32]);
-        }
+    for (i, &corner) in corners.iter().enumerate() {
+        positions.push(corner);
+        let normal = match i {
+            0 | 1 | 2 | 3 => [0.0, -1.0, 0.0], // bottom
+            4 | 5 | 6 | 7 => [0.0, 1.0, 0.0],  // top
+            _ => [0.0, 0.0, 0.0],
+        };
+        normals.push(normal);
+        let uv = match i {
+            0 => [0.0, 0.0],
+            1 => [1.0, 0.0],
+            2 => [1.0, 1.0],
+            3 => [0.0, 1.0],
+            4 => [0.0, 0.0],
+            5 => [1.0, 0.0],
+            6 => [1.0, 1.0],
+            7 => [0.0, 1.0],
+            _ => [0.0, 0.0],
+        };
+        uvs.push(uv);
     }
 
-    // Top face
-    for z in 0..resolution {
-        for x in 0..resolution {
-            let i = x + z * (resolution + 1);
-            indices.extend([
-                top_indices[i],
-                top_indices[i + 1],
-                top_indices[i + resolution + 1],
-                top_indices[i + 1],
-                top_indices[i + resolution + 2],
-                top_indices[i + resolution + 1],
-            ]);
-        }
-    }
-
-    // Bottom face
-    for z in 0..resolution {
-        for x in 0..resolution {
-            let i = x + z * (resolution + 1);
-            indices.extend([
-                bottom_indices[i],
-                bottom_indices[i + resolution + 1],
-                bottom_indices[i + 1],
-                bottom_indices[i + 1],
-                bottom_indices[i + resolution + 1],
-                bottom_indices[i + resolution + 2],
-            ]);
-        }
-    }
-
-    // Side faces
-    let row_len = resolution + 1;
-    for z in 0..resolution {
-        for x in 0..resolution {
-            let i = x + z * row_len;
-            let top0 = top_indices[i];
-            let top1 = top_indices[i + 1];
-            let top2 = top_indices[i + row_len];
-            let top3 = top_indices[i + row_len + 1];
-
-            let bottom0 = bottom_indices[i];
-            let bottom1 = bottom_indices[i + 1];
-            let bottom2 = bottom_indices[i + row_len];
-            let bottom3 = bottom_indices[i + row_len + 1];
-
-            // +X face
-            indices.extend([top1, bottom1, top3, bottom1, bottom3, top3]);
-
-            // -X face
-            indices.extend([top2, bottom2, top0, bottom2, bottom0, top0]);
-
-            // +Z face
-            indices.extend([top3, bottom3, top2, bottom3, bottom2, top2]);
-
-            // -Z face
-            indices.extend([top0, bottom0, top1, bottom0, bottom1, top1]);
-        }
-    }
+    // Indices for 12 triangles (2 per face)
+    indices.extend([
+        // bottom
+        0, 1, 2, 0, 2, 3, // top
+        4, 6, 5, 4, 7, 6, // +X
+        1, 5, 6, 1, 6, 2, // -X
+        0, 3, 7, 0, 7, 4, // +Z
+        2, 6, 7, 2, 7, 3, // -Z
+        0, 4, 5, 0, 5, 1,
+    ]);
 
     // Rotation must be applied before translation, so the axes stay correct
     rotate(&mut positions, &mut normals, direction.mesh_rotation());
